@@ -43,9 +43,10 @@ func (m *RTSPMonitor) MonitorAll(ctx context.Context, devs []RTSPDevice) error {
 
 func (m *RTSPMonitor) MonitorDevice(ctx context.Context, dev RTSPDevice) error {
 	for {
+		m.log(ctx, "connecting", "name", dev.Name, "url", dev.SafeURL, "media", dev.Media)
 		stream, err := m.connect(ctx, dev)
 		if err != nil {
-			m.warn(ctx, "failed to connect", "url", dev.SafeURL, "err", err)
+			m.warn(ctx, "failed to connect", "name", dev.Name, "url", dev.SafeURL, "media", dev.Media, "err", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -54,14 +55,14 @@ func (m *RTSPMonitor) MonitorDevice(ctx context.Context, dev RTSPDevice) error {
 			continue
 		}
 		m.log(ctx, "connected", "name", dev.Name, "url", dev.SafeURL, "media", dev.Media)
-		err = stream.sink(ctx)
-		if err == nil {
-			m.log(ctx, "playback ended", "name", dev.Name, "url", dev.SafeURL, "media", dev.Media, "err", err)
+		if err := stream.sink(ctx, time.Second*10); err != nil {
+			m.warn(ctx, "playback ended", "name", dev.Name, "url", dev.SafeURL, "media", dev.Media, "err", err)
 		}
 		stream.close()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		default:
 		}
 	}
 }
@@ -183,14 +184,13 @@ func (s *rtspStream) callback(ctx context.Context, decode func(*rtp.Packet) ([][
 	}
 }
 
-func (s *rtspStream) sink(ctx context.Context) error {
+func (s *rtspStream) sink(ctx context.Context, progressDurationSecs time.Duration) error {
 	resp, err := s.client.Play(nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("play failed: %v", err)
 	}
 	if resp.StatusCode != base.StatusOK {
-		s.m.warn(ctx, "waiting for timestamp", "name", s.dev.Name, "url", s.dev.SafeURL)
-		return fmt.Errorf("play failed: %v", resp.StatusMessage)
+		return fmt.Errorf("play failed: waiting for timestamp: %v", resp.StatusMessage)
 	}
 	last := 0 * time.Second
 	for {
@@ -198,16 +198,17 @@ func (s *rtspStream) sink(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case pts := <-s.pktPTS:
-			if n := pts.Round(time.Second); n > last {
+			if n := pts.Round(progressDurationSecs); n > last {
 				last = n
 				s.m.log(ctx, "ok", "name", s.dev.Name, "url", s.dev.SafeURL, "pts", pts.String())
 			}
 		case <-time.After(s.dev.Period):
-			return fmt.Errorf("timeout after %v", s.dev.Period)
+			return fmt.Errorf("timeout after %s", s.dev.Period)
 		}
 	}
 }
 
 func (s *rtspStream) close() {
 	s.client.Close()
+	close(s.pktPTS)
 }
