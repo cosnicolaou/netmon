@@ -80,10 +80,16 @@ type ARPOption struct {
 	Period  time.Duration `yaml:"period,omitempty"`
 }
 
+type RoutingOption struct {
+	Devices []string      `yaml:"devices"`
+	Period  time.Duration `yaml:"period,omitempty"`
+}
+
 type Options struct {
-	ICMP *ICMPOption `yaml:"icmp"`
-	RTSP *RTSPOption `yaml:"rtsp"`
-	ARP  *ARPOption  `yaml:"arp"`
+	ICMP    *ICMPOption    `yaml:"icmp"`
+	RTSP    *RTSPOption    `yaml:"rtsp"`
+	ARP     *ARPOption     `yaml:"arp"`
+	Routing *RoutingOption `yaml:"routing"`
 }
 
 type Config struct {
@@ -242,11 +248,7 @@ func (c Config) RTSPDevices() ([]RTSPDevice, error) {
 	return cfg, nil
 }
 
-func (c Config) ARPDevices() ([]Device, error) {
-	if c.Options.ARP == nil {
-		return nil, nil
-	}
-	names := c.deviceNamesFor(c.Options.ARP.Devices)
+func (c Config) devicesFor(names []string) ([]Device, error) {
 	cfg := make([]Device, 0, len(names))
 	for _, name := range names {
 		d := c.devices[name]
@@ -257,4 +259,20 @@ func (c Config) ARPDevices() ([]Device, error) {
 		cfg = append(cfg, *d)
 	}
 	return cfg, nil
+}
+
+func (c Config) ARPDevices() ([]Device, error) {
+	if c.Options.ARP == nil {
+		return nil, nil
+	}
+	names := c.deviceNamesFor(c.Options.ARP.Devices)
+	return c.devicesFor(names)
+}
+
+func (c Config) RoutingDevices() ([]Device, error) {
+	if c.Options.Routing == nil {
+		return nil, nil
+	}
+	names := c.deviceNamesFor(c.Options.Routing.Devices)
+	return c.devicesFor(names)
 }

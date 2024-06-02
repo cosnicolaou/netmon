@@ -49,14 +49,21 @@ func (m *ARPMonitor) MonitorAll(ctx context.Context, devs []Device) error {
 		case <-time.After(m.period):
 		}
 		added, removed, changed := compareTables(m.previous, table)
+		shown := false
 		for _, e := range added {
-			m.log(ctx, "added arp entry", "ip", e.ip, "mac", e.mac, "iface", e.iface)
+			m.log(ctx, "added arp entry", "name", m.devices[e.ip], "ip", e.ip, "mac", e.mac, "iface", e.iface)
+			shown = true
 		}
 		for _, e := range removed {
-			m.log(ctx, "removed arp entry", "ip", e.ip, "mac", e.mac, "iface", e.iface)
+			m.log(ctx, "removed arp entry", "name", m.devices[e.ip], "ip", e.ip, "mac", e.mac, "iface", e.iface)
+			shown = true
 		}
 		for _, e := range changed {
-			m.warn(ctx, "changed arp entry", "ip", e.current.ip, "mac", e.current.mac, "iface", e.current.iface, "previous_mac", e.previous.mac, "previous_iface", e.previous.iface)
+			m.warn(ctx, "changed arp entry", "name", m.devices[e.current.ip], "ip", e.current.ip, "mac", e.current.mac, "iface", e.current.iface, "previous_mac", e.previous.mac, "previous_iface", e.previous.iface)
+			shown = true
+		}
+		if !shown {
+			m.log(ctx, "no changes in arp table")
 		}
 		m.mu.Lock()
 		m.previous = table

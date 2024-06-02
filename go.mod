@@ -20,5 +20,6 @@ require (
 	github.com/pion/rtp v1.8.7-0.20240429002300-bc5124c9d0d0 // indirect
 	github.com/pion/sdp/v3 v3.0.9 // indirect
 	golang.org/x/sys v0.20.0 // indirect
+	gopkg.in/mcuadros/go-syslog.v2 v2.3.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

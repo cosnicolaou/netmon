@@ -136,7 +136,7 @@ func (m *RTSPMonitor) connect(ctx context.Context, dev RTSPDevice) (*rtspStream,
 
 	_, err = c.Setup(desc.BaseURL, stream.media, 0, 0)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("setup failed: %v", err)
 	}
 
 	// called when a RTP packet arrives

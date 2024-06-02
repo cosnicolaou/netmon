@@ -12,6 +12,8 @@ type DeviceMonitorFlags struct {
 	Ping    bool   `subcmd:"ping,true,enable pinging of devices"`
 	ARP     bool   `subcmd:"arp,true,enable arp monitoring"`
 	RTSP    bool   `subcmd:"rtsp,false,enable rtsp monitoring"`
+	Routing bool   `subcmd:"routing,true,enable routing monitoring"`
+	Syslog  bool   `subcmd:"syslog,false,enable syslog server"`
 }
 
 type Devices struct {
@@ -47,7 +49,11 @@ func (d *Devices) Monitor(ctx context.Context, flags any, args []string) error {
 		monitors = append(monitors, func() error {
 			return d.rtspMonitor(ctx, config, l)
 		})
-
+	}
+	if fv.Routing {
+		monitors = append(monitors, func() error {
+			return d.routeMonitor(ctx, config, l)
+		})
 	}
 	var g errgroup.T
 	for _, m := range monitors {
@@ -90,4 +96,21 @@ func (d *Devices) rtspMonitor(ctx context.Context, config *Config, l *Logger) er
 	}
 	monitor := NewRTSPMonitor(l)
 	return monitor.MonitorAll(ctx, devs)
+}
+
+func (d *Devices) routeMonitor(ctx context.Context, config *Config, l *Logger) error {
+	devs, err := config.RoutingDevices()
+	if err != nil {
+		return err
+	}
+	if len(devs) == 0 {
+		return nil
+	}
+	monitor := NewRouteMonitor(l, config.Options.Routing.Period)
+	return monitor.MonitorAll(ctx, devs)
+}
+
+func (d *Devices) syslogMonitor(ctx context.Context, config *Config, l *Logger) error {
+	s := newSyslogServer(l)
+	return s.run(ctx)
 }
