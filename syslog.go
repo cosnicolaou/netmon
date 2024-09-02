@@ -6,6 +6,7 @@ import (
 
 	"cloudeng.io/sync/errgroup"
 	"gopkg.in/mcuadros/go-syslog.v2"
+	"gopkg.in/mcuadros/go-syslog.v2/format"
 )
 
 type syslogServer struct {
@@ -16,12 +17,25 @@ func newSyslogServer(l *Logger) *syslogServer {
 	return &syslogServer{l: l}
 }
 
+func (s *syslogServer) log(ctx context.Context, format string, args []any) {
+	s.l.Log(ctx, "syslog", format, args...)
+}
+
+func kv(parts format.LogParts) []any {
+	var res []any
+	for k, v := range parts {
+		res = append(res, k, v)
+		fmt.Printf(".... %T .. %T: %v %v\n", k, v, k, v)
+	}
+	return res
+}
+
 func (s *syslogServer) run(ctx context.Context) error {
 	channel := make(syslog.LogPartsChannel)
 	handler := syslog.NewChannelHandler(channel)
 
 	server := syslog.NewServer()
-	server.SetFormat(syslog.RFC5424)
+	server.SetFormat(syslog.RFC3164) // How to support other formats?
 	server.SetHandler(handler)
 	server.ListenUDP("0.0.0.0:514")
 	server.Boot()
@@ -35,7 +49,7 @@ func (s *syslogServer) run(ctx context.Context) error {
 				if !ok {
 					return nil
 				}
-				fmt.Println(logParts)
+				s.log(ctx, "received syslog", kv(logParts))
 			case <-ctx.Done():
 				server.Kill()
 				close(channel)

@@ -9,10 +9,10 @@ import (
 type DeviceMonitorFlags struct {
 	ConfigFlags
 	LogFile string `subcmd:"log-file,netmon.slog,the file to write structured logs to"`
-	Ping    bool   `subcmd:"ping,true,enable pinging of devices"`
-	ARP     bool   `subcmd:"arp,true,enable arp monitoring"`
+	Ping    bool   `subcmd:"ping,false,enable pinging of devices"`
+	ARP     bool   `subcmd:"arp,false,enable arp monitoring"`
 	RTSP    bool   `subcmd:"rtsp,false,enable rtsp monitoring"`
-	Routing bool   `subcmd:"routing,true,enable routing monitoring"`
+	Routing bool   `subcmd:"routing,false,enable routing monitoring"`
 	Syslog  bool   `subcmd:"syslog,false,enable syslog server"`
 }
 
@@ -53,6 +53,11 @@ func (d *Devices) Monitor(ctx context.Context, flags any, args []string) error {
 	if fv.Routing {
 		monitors = append(monitors, func() error {
 			return d.routeMonitor(ctx, config, l)
+		})
+	}
+	if fv.Syslog {
+		monitors = append(monitors, func() error {
+			return d.syslogMonitor(ctx, config, l)
 		})
 	}
 	var g errgroup.T
