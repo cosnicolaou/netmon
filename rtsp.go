@@ -50,7 +50,7 @@ func (m *RTSPMonitor) MonitorDevice(ctx context.Context, dev RTSPDevice) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(dev.Period):
+			case <-time.After(dev.Interval):
 			}
 			continue
 		}
@@ -202,8 +202,8 @@ func (s *rtspStream) sink(ctx context.Context, progressDurationSecs time.Duratio
 				last = n
 				s.m.log(ctx, "ok", "name", s.dev.Name, "url", s.dev.SafeURL, "pts", pts.String())
 			}
-		case <-time.After(s.dev.Period):
-			return fmt.Errorf("timeout after %s", s.dev.Period)
+		case <-time.After(s.dev.Timeout):
+			return fmt.Errorf("timeout after %s", s.dev.Timeout)
 		}
 	}
 }

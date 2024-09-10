@@ -12,17 +12,17 @@ import (
 
 type ARPMonitor struct {
 	l        *Logger
-	period   time.Duration
+	interval time.Duration
 	devices  map[string]Device
 	mu       sync.Mutex
 	previous []arpEntry
 }
 
-func NewARPMonitor(l *Logger, period time.Duration) *ARPMonitor {
+func NewARPMonitor(l *Logger, interval time.Duration) *ARPMonitor {
 	return &ARPMonitor{
-		l:       l,
-		period:  period,
-		devices: make(map[string]Device),
+		l:        l,
+		interval: interval,
+		devices:  make(map[string]Device),
 	}
 }
 
@@ -46,7 +46,7 @@ func (m *ARPMonitor) MonitorAll(ctx context.Context, devs []Device) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(m.period):
+		case <-time.After(m.interval):
 		}
 		added, removed, changed := compareTables(m.previous, table)
 		shown := false

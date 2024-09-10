@@ -10,6 +10,21 @@ import (
 	"cloudeng.io/cmdutil/cmdyaml"
 )
 
+const (
+	DefaultICMPTimeout      = 5 * time.Second
+	DefaultICMPPingInterval = 5 * time.Second
+
+	DefaultRTSPTimeout  = 5 * time.Second
+	DefaultRTSPInterval = 30 * time.Second
+	DefaultRSTPPort     = 554
+
+	DefaultCGITimeout  = 5 * time.Second
+	DefaultCGIInterval = time.Minute
+	DefaultCGIPort     = 80
+
+	DefaultARPInterval = 10 * time.Second
+)
+
 type AuthConfig struct {
 	ID    string `yaml:"auth_id"`
 	User  string `yaml:"user"`
@@ -21,29 +36,45 @@ func (a AuthConfig) String() string {
 }
 
 type Device struct {
-	Name string      `yaml:"name"`
-	IP   string      `yaml:"ip"`
-	RTSP *RTSPConfig `yaml:"rtsp,omitempty"`
-	ICMP *ICMPConfig `yaml:"icmp,omitempty"`
+	Name   string      `yaml:"name"`
+	IP     string      `yaml:"ip"`
+	AuthID string      `yaml:"auth_id,omitempty"`
+	RTSP   *RTSPConfig `yaml:"rtsp,omitempty"`
+	ICMP   *ICMPConfig `yaml:"icmp,omitempty"`
+	CGI    []CGIConfig `yaml:"cgi,omitempty"`
+	ipAddr netip.Addr
 }
 
 type ICMPConfig struct {
-	Period  time.Duration `yaml:"period,omitempty"`
-	Timeout time.Duration `yaml:"timeout,omitempty"`
+	Interval time.Duration `yaml:"interval,omitempty"`
+	Timeout  time.Duration `yaml:"timeout,omitempty"`
 }
 
 type RTSPConfig struct {
+	Path     string        `yaml:"path,omitempty"`
+	AuthID   string        `yaml:"auth_id,omitempty"`
+	Port     int           `yaml:"port,omitempty"`
+	Media    string        `yaml:"media,omitempty"`
+	Interval time.Duration `yaml:"interval,omitempty"`
+	Timeout  time.Duration `yaml:"timeout,omitempty"`
+}
+
+type CGIConfig struct {
 	Path    string        `yaml:"path,omitempty"`
-	AuthID  string        `yaml:"auth_id,omitempty"`
+	Scheme  string        `yaml:"scheme,omitempty"`
 	Port    int           `yaml:"port,omitempty"`
-	Media   string        `yaml:"media,omitempty"`
-	Period  time.Duration `yaml:"period,omitempty"`
 	Timeout time.Duration `yaml:"timeout,omitempty"`
+	// NOTE: Interval is the minimum interval between requests.
+	// Where there are multiple requests for a single host the interval
+	// for each request is honored and hence the interval for each individual
+	// requests becomes the sum of all of the intervals.
+	Interval time.Duration `yaml:"interval,omitempty" cmd:"the minimum interval between requests"`
+	AuthID   string        `yaml:"auth_id,omitempty"`
 }
 
 func (r RTSPConfig) String() string {
 	out := strings.Builder{}
-	fmt.Fprintf(&out, "period: %v, path: %s ", r.Period, r.Path)
+	fmt.Fprintf(&out, "interval: %v, path: %s ", r.Interval, r.Path)
 	if len(r.AuthID) > 0 {
 		fmt.Fprintf(&out, "(auth_id: %v)", r.AuthID)
 	}
@@ -60,29 +91,34 @@ func (d Device) String() string {
 }
 
 type ICMPOption struct {
-	Devices []string      `yaml:"devices"`
-	Period  time.Duration `yaml:"period,omitempty"`
-	Timeout time.Duration `yaml:"timeout,omitempty"`
+	Devices  []string      `yaml:"devices"`
+	Interval time.Duration `yaml:"interval,omitempty"`
+	Timeout  time.Duration `yaml:"timeout,omitempty"`
 }
 
 func (i ICMPOption) String() string {
-	return fmt.Sprintf("period: %v", i.Period)
+	return fmt.Sprintf("interval: %v", i.Interval)
 }
 
 type RTSPOption struct {
-	Devices []string      `yaml:"devices"`
-	Period  time.Duration `yaml:"period,omitempty"`
-	Timeout time.Duration `yaml:"timeout,omitempty"`
+	Devices  []string      `yaml:"devices"`
+	Interval time.Duration `yaml:"interval,omitempty"`
+	Timeout  time.Duration `yaml:"timeout,omitempty"`
 }
 
 type ARPOption struct {
-	Devices []string      `yaml:"devices"`
-	Period  time.Duration `yaml:"period,omitempty"`
+	Devices  []string      `yaml:"devices"`
+	Interval time.Duration `yaml:"interval,omitempty"`
 }
 
 type RoutingOption struct {
-	Devices []string      `yaml:"devices"`
-	Period  time.Duration `yaml:"period,omitempty"`
+	Devices  []string      `yaml:"devices"`
+	Interval time.Duration `yaml:"interval,omitempty"`
+}
+
+type CGIOption struct {
+	Interval time.Duration `yaml:"interval,omitempty"`
+	Timeout  time.Duration `yaml:"timeout,omitempty"`
 }
 
 type Options struct {
@@ -90,6 +126,7 @@ type Options struct {
 	RTSP    *RTSPOption    `yaml:"rtsp"`
 	ARP     *ARPOption     `yaml:"arp"`
 	Routing *RoutingOption `yaml:"routing"`
+	CGI     *CGIOption     `yaml:"cgi"`
 }
 
 type Config struct {
@@ -121,17 +158,24 @@ func ParseConfig(ctx context.Context, flags ConfigFlags) (*Config, error) {
 	}
 	config.devices = make(map[string]*Device)
 	for i := range config.Devices {
-		config.devices[config.Devices[i].Name] = &config.Devices[i]
+		device := &config.Devices[i]
+		if len(device.IP) > 0 {
+			device.ipAddr, err = ParseIPAddr(device.IP)
+			if err != nil {
+				return nil, fmt.Errorf("device %q: %v", device.Name, err)
+			}
+		}
+		config.devices[config.Devices[i].Name] = device
 	}
 	return &config, err
 }
 
 type ICMPDevice struct {
-	Name    string
-	IP      string
-	Period  time.Duration
-	Timeout time.Duration
-	ipAddr  netip.Addr
+	Name     string
+	IP       string
+	Interval time.Duration
+	Timeout  time.Duration
+	ipAddr   netip.Addr
 }
 
 func (c Config) deviceNamesFor(names []string) []string {
@@ -142,6 +186,34 @@ func (c Config) deviceNamesFor(names []string) []string {
 		}
 	}
 	return names
+}
+
+func defaultIntervalTimeout(interval, timeout, defaultInterval, defaultTimeout time.Duration) (time.Duration, time.Duration) {
+	if interval == 0 {
+		interval = defaultInterval
+	}
+	if timeout == 0 {
+		timeout = defaultTimeout
+	}
+	return interval, timeout
+}
+
+func (c Config) defaultAuthID(authID, defaultAuthID string) *AuthConfig {
+	auth := c.auth[authID]
+	if auth != nil {
+		return auth
+	}
+	if auth = c.auth[defaultAuthID]; auth != nil {
+		return auth
+	}
+	return &AuthConfig{User: "admin", Token: "admin"}
+}
+
+func defaultPort(port, defaultPort int) int {
+	if port == 0 {
+		port = defaultPort
+	}
+	return port
 }
 
 func (c Config) ICMPDevices() ([]ICMPDevice, error) {
@@ -155,43 +227,28 @@ func (c Config) ICMPDevices() ([]ICMPDevice, error) {
 		if d == nil {
 			return nil, fmt.Errorf("device %q not found\n", name)
 		}
-		addr, err := ParseIPAddr(d.IP)
-		if err != nil {
-			return nil, fmt.Errorf("device %q: %v", name, err)
-		}
 		v := ICMPDevice{
-			Name:    d.Name,
-			IP:      d.IP,
-			Period:  c.Options.ICMP.Period,
-			Timeout: c.Options.ICMP.Timeout,
-			ipAddr:  addr,
+			Name:   d.Name,
+			IP:     d.IP,
+			ipAddr: d.ipAddr,
 		}
-		if d.ICMP != nil {
-			if d.ICMP.Period != 0 {
-				v.Period = d.ICMP.Period
-			}
-			if d.ICMP.Timeout != 0 {
-				v.Timeout = d.ICMP.Timeout
-			}
-		}
-		if v.Timeout == 0 {
-			v.Timeout = 5 * time.Second
-		}
+		v.Interval, v.Timeout = defaultIntervalTimeout(d.ICMP.Interval, d.ICMP.Timeout, c.Options.ICMP.Interval, c.Options.ICMP.Timeout)
+		v.Interval, v.Timeout = defaultIntervalTimeout(v.Interval, v.Timeout, DefaultICMPTimeout, DefaultICMPPingInterval)
 		cfg = append(cfg, v)
 	}
 	return cfg, nil
 }
 
 type RTSPDevice struct {
-	Name    string
-	IP      string
-	Port    int
-	URL     string
-	SafeURL string // no password
-	Media   string
-	Period  time.Duration
-	Timeout time.Duration
-	ipAddr  netip.Addr
+	Name     string
+	IP       string
+	Port     int
+	URL      string
+	SafeURL  string // no password
+	Media    string
+	Interval time.Duration
+	Timeout  time.Duration
+	ipAddr   netip.Addr
 }
 
 func (c Config) RTSPDevices() ([]RTSPDevice, error) {
@@ -209,43 +266,64 @@ func (c Config) RTSPDevices() ([]RTSPDevice, error) {
 		if d.RTSP == nil {
 			continue
 		}
-		addr, err := ParseIPAddr(d.IP)
-		if err != nil {
-			return nil, fmt.Errorf("device %q: %v", name, err)
-		}
 		v := RTSPDevice{
-			Name:    d.Name,
-			IP:      d.IP,
-			Period:  c.Options.RTSP.Period,
-			Timeout: c.Options.RTSP.Timeout,
-			Media:   "H264",
-			Port:    554,
-			ipAddr:  addr,
-		}
-		if d.RTSP.Port != 0 {
-			v.Port = d.RTSP.Port
-		}
-		if d.RTSP.Period != 0 {
-			v.Period = d.RTSP.Period
-		}
-		if d.RTSP.Timeout != 0 {
-			v.Timeout = d.RTSP.Timeout
+			Name:   d.Name,
+			IP:     d.IP,
+			Media:  "H264",
+			ipAddr: d.ipAddr,
 		}
 		if len(d.RTSP.Media) != 0 {
 			v.Media = d.RTSP.Media
 		}
-		auth := c.auth[d.RTSP.AuthID]
-		if auth == nil {
-			auth = &AuthConfig{User: "admin", Token: "admin"}
-		}
+		v.Port = defaultPort(d.RTSP.Port, DefaultRSTPPort)
+		v.Interval, v.Timeout = defaultIntervalTimeout(d.RTSP.Interval, d.RTSP.Timeout, c.Options.RTSP.Interval, c.Options.RTSP.Timeout)
+		v.Timeout, v.Interval = defaultIntervalTimeout(v.Interval, v.Timeout, DefaultRTSPTimeout, DefaultRTSPInterval)
+		auth := c.defaultAuthID(d.RTSP.AuthID, d.AuthID)
 		v.URL = fmt.Sprintf("rtsp://%s:%s@%s:%d/%s", auth.User, auth.Token, v.IP, v.Port, d.RTSP.Path)
 		v.SafeURL = fmt.Sprintf("rtsp://%s:%s@%s:%d/%s", auth.User, "****", v.IP, v.Port, d.RTSP.Path)
-		if v.Timeout == 0 {
-			v.Timeout = 5 * time.Second
-		}
 		cfg = append(cfg, v)
 	}
 	return cfg, nil
+}
+
+type CGIInvocation struct {
+	Name     string
+	Scheme   string
+	Path     string
+	Port     int
+	Interval time.Duration
+	Timeout  time.Duration
+	Auth     *AuthConfig
+	IPAddr   netip.Addr
+}
+
+func (c Config) CGIInvocations() ([]CGIInvocation, error) {
+	if c.Options.CGI == nil {
+		return nil, nil
+	}
+	invocations := make([]CGIInvocation, 0, len(c.devices))
+	for _, device := range c.devices {
+		if device.CGI == nil {
+			continue
+		}
+		for _, invocation := range device.CGI {
+			v := CGIInvocation{
+				Name:   device.Name,
+				Path:   invocation.Path,
+				IPAddr: device.ipAddr,
+				Scheme: invocation.Scheme,
+			}
+			if v.Scheme == "" {
+				v.Scheme = "http"
+			}
+			v.Port = defaultPort(v.Port, DefaultCGIPort)
+			v.Interval, v.Timeout = defaultIntervalTimeout(invocation.Interval, invocation.Timeout, c.Options.CGI.Interval, c.Options.CGI.Timeout)
+			v.Timeout, v.Interval = defaultIntervalTimeout(v.Interval, v.Timeout, DefaultCGITimeout, DefaultCGIInterval)
+			v.Auth = c.defaultAuthID(invocation.AuthID, device.AuthID)
+			invocations = append(invocations, v)
+		}
+	}
+	return invocations, nil
 }
 
 func (c Config) devicesFor(names []string) ([]Device, error) {

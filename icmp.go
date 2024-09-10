@@ -172,7 +172,7 @@ func (m *ICMPMonitor) MonitorDevice(ctx context.Context, dev ICMPDevice) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(dev.Period):
+		case <-time.After(dev.Interval):
 			seq++
 		}
 	}

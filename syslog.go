@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"cloudeng.io/sync/errgroup"
 	"gopkg.in/mcuadros/go-syslog.v2"
@@ -25,7 +24,6 @@ func kv(parts format.LogParts) []any {
 	var res []any
 	for k, v := range parts {
 		res = append(res, k, v)
-		fmt.Printf(".... %T .. %T: %v %v\n", k, v, k, v)
 	}
 	return res
 }

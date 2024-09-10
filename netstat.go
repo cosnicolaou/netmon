@@ -13,17 +13,17 @@ import (
 
 type RouteMonitor struct {
 	l        *Logger
-	period   time.Duration
+	interval time.Duration
 	devices  map[string]Device
 	mu       sync.Mutex
 	previous []routeEntry
 }
 
-func NewRouteMonitor(l *Logger, period time.Duration) *RouteMonitor {
+func NewRouteMonitor(l *Logger, interval time.Duration) *RouteMonitor {
 	return &RouteMonitor{
-		l:       l,
-		period:  period,
-		devices: make(map[string]Device),
+		l:        l,
+		interval: interval,
+		devices:  make(map[string]Device),
 	}
 }
 
@@ -47,7 +47,7 @@ func (m *RouteMonitor) MonitorAll(ctx context.Context, devs []Device) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(m.period):
+		case <-time.After(m.interval):
 		}
 		for _, e := range table {
 			if e.exp > 0 && e.exp < time.Second*30 {
