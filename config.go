@@ -60,15 +60,12 @@ type RTSPConfig struct {
 }
 
 type CGIConfig struct {
-	Path    string        `yaml:"path,omitempty"`
-	Scheme  string        `yaml:"scheme,omitempty"`
-	Port    int           `yaml:"port,omitempty"`
-	Timeout time.Duration `yaml:"timeout,omitempty"`
-	// NOTE: Interval is the minimum interval between requests.
-	// Where there are multiple requests for a single host the interval
-	// for each request is honored and hence the interval for each individual
-	// requests becomes the sum of all of the intervals.
-	Interval time.Duration `yaml:"interval,omitempty" cmd:"the minimum interval between requests"`
+	Path     string        `yaml:"path,omitempty"`
+	Scheme   string        `yaml:"scheme,omitempty"`
+	Port     int           `yaml:"port,omitempty"`
+	Timeout  time.Duration `yaml:"timeout,omitempty"`
+	Interval time.Duration `yaml:"interval,omitempty"`
+	OnceOnly bool          `yaml:"once_only,omitempty"`
 	AuthID   string        `yaml:"auth_id,omitempty"`
 }
 
@@ -293,6 +290,7 @@ type CGIInvocation struct {
 	Port     int
 	Interval time.Duration
 	Timeout  time.Duration
+	OnceOnly bool
 	Auth     *AuthConfig
 	IPAddr   netip.Addr
 }
@@ -308,17 +306,18 @@ func (c Config) CGIInvocations() ([]CGIInvocation, error) {
 		}
 		for _, invocation := range device.CGI {
 			v := CGIInvocation{
-				Name:   device.Name,
-				Path:   invocation.Path,
-				IPAddr: device.ipAddr,
-				Scheme: invocation.Scheme,
+				Name:     device.Name,
+				Path:     invocation.Path,
+				IPAddr:   device.ipAddr,
+				Scheme:   invocation.Scheme,
+				OnceOnly: invocation.OnceOnly,
 			}
 			if v.Scheme == "" {
 				v.Scheme = "http"
 			}
 			v.Port = defaultPort(v.Port, DefaultCGIPort)
 			v.Interval, v.Timeout = defaultIntervalTimeout(invocation.Interval, invocation.Timeout, c.Options.CGI.Interval, c.Options.CGI.Timeout)
-			v.Timeout, v.Interval = defaultIntervalTimeout(v.Interval, v.Timeout, DefaultCGITimeout, DefaultCGIInterval)
+			v.Interval, v.Timeout = defaultIntervalTimeout(v.Interval, v.Timeout, DefaultCGIInterval, DefaultCGITimeout)
 			v.Auth = c.defaultAuthID(invocation.AuthID, device.AuthID)
 			invocations = append(invocations, v)
 		}

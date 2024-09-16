@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"sync"
 
 	"cloudeng.io/sync/errgroup"
 )
@@ -20,6 +22,7 @@ type DeviceMonitorFlags struct {
 }
 
 type Devices struct {
+	dryRunLock sync.Mutex
 }
 
 func (d *Devices) Monitor(ctx context.Context, flags any, args []string) error {
@@ -28,15 +31,21 @@ func (d *Devices) Monitor(ctx context.Context, flags any, args []string) error {
 	if err != nil {
 		return err
 	}
-	lf, err := newLogfile(fv.LogFile)
-	if err != nil {
-		return err
+	var l *Logger
+	if !fv.DryRun {
+		lf, err := newLogfile(fv.LogFile)
+		if err != nil {
+			return err
+		}
+		defer lf.Close()
+		l, err = NewLogger(lf, nil)
+		if err != nil {
+			return err
+		}
+	} else {
+		l, _ = NewLogger(os.Stdout, nil)
 	}
-	defer lf.Close()
-	l, err := NewLogger(lf, nil)
-	if err != nil {
-		return err
-	}
+
 	monitors := []func() error{}
 	if fv.Ping {
 		monitors = append(monitors, func() error {
@@ -84,10 +93,12 @@ func (d *Devices) pingMonitor(ctx context.Context, dryRun bool, config *Config, 
 		return nil
 	}
 	if dryRun {
+		d.dryRunLock.Lock()
 		fmt.Printf("ping %d devices with interval %s and timeout %s\n", len(devs), config.Options.ICMP.Interval, config.Options.ICMP.Timeout)
 		for _, dev := range devs {
 			fmt.Printf("ping %s\n", dev.ipAddr)
 		}
+		d.dryRunLock.Unlock()
 		return nil
 	}
 	monitor := NewICMPMonitor(l)
@@ -103,10 +114,12 @@ func (d *Devices) arpMonitor(ctx context.Context, dryRun bool, config *Config, l
 		return nil
 	}
 	if dryRun {
+		d.dryRunLock.Lock()
 		fmt.Printf("arp %d devices with interval %s\n", len(devs), config.Options.ARP.Interval)
 		for _, dev := range devs {
 			fmt.Printf("arp %s\n", dev.ipAddr)
 		}
+		d.dryRunLock.Unlock()
 		return nil
 	}
 	monitor := NewARPMonitor(l, config.Options.ARP.Interval)
@@ -122,10 +135,12 @@ func (d *Devices) rtspMonitor(ctx context.Context, dryRun bool, config *Config, 
 		return nil
 	}
 	if dryRun {
+		d.dryRunLock.Lock()
 		fmt.Printf("rtsp %d devices with interval %s\n", len(devs), config.Options.RTSP.Interval)
 		for _, dev := range devs {
 			fmt.Printf("rtsp %s\n", dev.ipAddr)
 		}
+		d.dryRunLock.Unlock()
 		return nil
 	}
 	monitor := NewRTSPMonitor(l)
@@ -141,10 +156,12 @@ func (d *Devices) routeMonitor(ctx context.Context, dryRun bool, config *Config,
 		return nil
 	}
 	if dryRun {
+		d.dryRunLock.Lock()
 		fmt.Printf("route table monitoring with interval %s\n", config.Options.Routing.Interval)
 		for _, dev := range devs {
 			fmt.Printf("route %s\n", dev.ipAddr)
 		}
+		d.dryRunLock.Unlock()
 		return nil
 	}
 	monitor := NewRouteMonitor(l, config.Options.Routing.Interval)
@@ -153,7 +170,10 @@ func (d *Devices) routeMonitor(ctx context.Context, dryRun bool, config *Config,
 
 func (d *Devices) syslogMonitor(ctx context.Context, dryRun bool, config *Config, l *Logger) error {
 	if dryRun {
+		d.dryRunLock.Lock()
 		fmt.Printf("syslog server\n")
+		d.dryRunLock.Unlock()
+		return nil
 	}
 	s := newSyslogServer(l)
 	return s.run(ctx)
@@ -168,10 +188,12 @@ func (d *Devices) cgiMonitor(ctx context.Context, dryRun bool, config *Config, l
 		return nil
 	}
 	if dryRun {
-		fmt.Printf("cgi %d devices with interval %s and timeout %s\n", len(cgiInvocations), config.Options.CGI.Interval, config.Options.CGI.Timeout)
+		d.dryRunLock.Lock()
+		fmt.Printf("cgi %d devices \n", len(cgiInvocations))
 		for _, inv := range cgiInvocations {
-			fmt.Printf("cgi %s %s\n", inv.IPAddr, inv.Path)
+			fmt.Printf("name: %s (%s), interval %s, timeout %s: %s\n", inv.Name, inv.IPAddr, inv.Interval, inv.Timeout, inv.Path)
 		}
+		d.dryRunLock.Unlock()
 		return nil
 	}
 	return NewCGIMonitor(l).MonitorAll(ctx, cgiInvocations)
