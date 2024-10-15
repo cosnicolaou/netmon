@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"cloudeng.io/cmdutil/cmdyaml"
+	"cloudeng.io/cmdutil/keystore"
+	"cloudeng.io/macos/keychainfs"
 )
 
 const (
@@ -25,20 +27,10 @@ const (
 	DefaultARPInterval = 10 * time.Second
 )
 
-type AuthConfig struct {
-	ID    string `yaml:"auth_id"`
-	User  string `yaml:"user"`
-	Token string `yaml:"token"`
-}
-
-func (a AuthConfig) String() string {
-	return a.ID + "[" + a.User + "]	"
-}
-
 type Device struct {
 	Name   string      `yaml:"name"`
 	IP     string      `yaml:"ip"`
-	AuthID string      `yaml:"auth_id,omitempty"`
+	AuthID string      `yaml:"key_id,omitempty"`
 	RTSP   *RTSPConfig `yaml:"rtsp,omitempty"`
 	ICMP   *ICMPConfig `yaml:"icmp,omitempty"`
 	CGI    []CGIConfig `yaml:"cgi,omitempty"`
@@ -52,7 +44,7 @@ type ICMPConfig struct {
 
 type RTSPConfig struct {
 	Path     string        `yaml:"path,omitempty"`
-	AuthID   string        `yaml:"auth_id,omitempty"`
+	AuthID   string        `yaml:"key_id,omitempty"`
 	Port     int           `yaml:"port,omitempty"`
 	Media    string        `yaml:"media,omitempty"`
 	Interval time.Duration `yaml:"interval,omitempty"`
@@ -66,14 +58,14 @@ type CGIConfig struct {
 	Timeout  time.Duration `yaml:"timeout,omitempty"`
 	Interval time.Duration `yaml:"interval,omitempty"`
 	OnceOnly bool          `yaml:"once_only,omitempty"`
-	AuthID   string        `yaml:"auth_id,omitempty"`
+	AuthID   string        `yaml:"key_id,omitempty"`
 }
 
 func (r RTSPConfig) String() string {
 	out := strings.Builder{}
 	fmt.Fprintf(&out, "interval: %v, path: %s ", r.Interval, r.Path)
 	if len(r.AuthID) > 0 {
-		fmt.Fprintf(&out, "(auth_id: %v)", r.AuthID)
+		fmt.Fprintf(&out, "(key_id: %v)", r.AuthID)
 	}
 	return out.String()
 }
@@ -129,19 +121,22 @@ type Options struct {
 type Config struct {
 	Options Options  `yaml:"options"`
 	Devices []Device `yaml:"devices"`
-	auth    map[string]*AuthConfig
+	auth    keystore.Keys
 	devices map[string]*Device
 }
 
 type ConfigFlags struct {
-	AuthFile    string `subcmd:"auth,$HOME/.netmon-auth.yaml,auth config file to use"`
+	AuthFile    string `subcmd:"auth,keychain:///netmon-auth.yaml?account=,auth config file to use"`
 	DevicesFile string `subcmd:"devices,$HOME/.netmon-config.yaml,config file to use"`
+}
+
+var uriHandlers = map[string]cmdyaml.URLHandler{
+	"keychain": keychainfs.NewSecureNoteFSFromURL,
 }
 
 func ParseConfig(ctx context.Context, flags ConfigFlags) (*Config, error) {
 	var config Config
-	var auth []AuthConfig
-	err := cmdyaml.ParseConfigFile(ctx, flags.AuthFile, &auth)
+	keys, err := keystore.ParseConfigURI(ctx, flags.AuthFile, uriHandlers)
 	if err != nil {
 		return nil, err
 	}
@@ -149,10 +144,7 @@ func ParseConfig(ctx context.Context, flags ConfigFlags) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	config.auth = make(map[string]*AuthConfig)
-	for i := range auth {
-		config.auth[auth[i].ID] = &auth[i]
-	}
+	config.auth = keys
 	config.devices = make(map[string]*Device)
 	for i := range config.Devices {
 		device := &config.Devices[i]
@@ -195,15 +187,14 @@ func defaultIntervalTimeout(interval, timeout, defaultInterval, defaultTimeout t
 	return interval, timeout
 }
 
-func (c Config) defaultAuthID(authID, defaultAuthID string) *AuthConfig {
-	auth := c.auth[authID]
-	if auth != nil {
+func (c Config) defaultAuthID(authID, defaultAuthID string) keystore.KeyInfo {
+	if auth, ok := c.auth[authID]; ok {
 		return auth
 	}
-	if auth = c.auth[defaultAuthID]; auth != nil {
+	if auth, ok := c.auth[defaultAuthID]; ok {
 		return auth
 	}
-	return &AuthConfig{User: "admin", Token: "admin"}
+	return keystore.KeyInfo{User: "admin", Token: "admin"}
 }
 
 func defaultPort(port, defaultPort int) int {
@@ -291,7 +282,7 @@ type CGIInvocation struct {
 	Interval time.Duration
 	Timeout  time.Duration
 	OnceOnly bool
-	Auth     *AuthConfig
+	Auth     keystore.KeyInfo
 	IPAddr   netip.Addr
 }
 
