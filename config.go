@@ -29,6 +29,7 @@ const (
 
 type Device struct {
 	Name   string      `yaml:"name"`
+	Ignore bool        `yaml:"ignore,omitempty"`
 	IP     string      `yaml:"ip"`
 	AuthID string      `yaml:"key_id,omitempty"`
 	RTSP   *RTSPConfig `yaml:"rtsp,omitempty"`
@@ -148,6 +149,9 @@ func ParseConfig(ctx context.Context, flags ConfigFlags) (*Config, error) {
 	config.devices = make(map[string]*Device)
 	for i := range config.Devices {
 		device := &config.Devices[i]
+		if device.Ignore {
+			continue
+		}
 		if len(device.IP) > 0 {
 			device.ipAddr, err = ParseIPAddr(device.IP)
 			if err != nil {
@@ -211,9 +215,12 @@ func (c Config) ICMPDevices() ([]ICMPDevice, error) {
 	names := c.deviceNamesFor(c.Options.ICMP.Devices)
 	cfg := make([]ICMPDevice, 0, len(names))
 	for _, name := range names {
-		d := c.devices[name]
-		if d == nil {
+		d, ok := c.devices[name]
+		if !ok {
 			return nil, fmt.Errorf("device %q not found\n", name)
+		}
+		if d.Ignore {
+			continue
 		}
 		v := ICMPDevice{
 			Name:   d.Name,
@@ -246,12 +253,12 @@ func (c Config) RTSPDevices() ([]RTSPDevice, error) {
 	names := c.deviceNamesFor(c.Options.RTSP.Devices)
 	cfg := make([]RTSPDevice, 0, len(names))
 	for _, name := range names {
-		d := c.devices[name]
-		if d == nil {
+		d, ok := c.devices[name]
+		if !ok {
 			fmt.Printf("device %q not found\n", name)
 			continue
 		}
-		if d.RTSP == nil {
+		if d.RTSP == nil || d.Ignore {
 			continue
 		}
 		v := RTSPDevice{
@@ -292,7 +299,7 @@ func (c Config) CGIInvocations() ([]CGIInvocation, error) {
 	}
 	invocations := make([]CGIInvocation, 0, len(c.devices))
 	for _, device := range c.devices {
-		if device.CGI == nil {
+		if device.CGI == nil || device.Ignore {
 			continue
 		}
 		for _, invocation := range device.CGI {
@@ -302,6 +309,7 @@ func (c Config) CGIInvocations() ([]CGIInvocation, error) {
 				IPAddr:   device.ipAddr,
 				Scheme:   invocation.Scheme,
 				OnceOnly: invocation.OnceOnly,
+				Port:     invocation.Port,
 			}
 			if v.Scheme == "" {
 				v.Scheme = "http"
@@ -319,9 +327,12 @@ func (c Config) CGIInvocations() ([]CGIInvocation, error) {
 func (c Config) devicesFor(names []string) ([]Device, error) {
 	cfg := make([]Device, 0, len(names))
 	for _, name := range names {
-		d := c.devices[name]
-		if d == nil {
+		d, ok := c.devices[name]
+		if !ok {
 			fmt.Printf("device %q not found\n", name)
+			continue
+		}
+		if d.Ignore {
 			continue
 		}
 		cfg = append(cfg, *d)
